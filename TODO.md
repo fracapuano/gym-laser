@@ -1,0 +1,3 @@
+- [ ] Move the `data` content on HF, using `datasets` to install the dataset locally. This removes `pandas` from the toml dependancies.
+- [ ] Refactor gym_laser to make it more modular, so that it can be extended more easily. The idea is being able to follow up on this environment by limiting the work needed to work with the environment, which is not possible as it currently stands due to how complicated the environment filing is.
+- [ ] Add profiling utils outside of the main environment code, to properly handle dependancies (otherwise line_profiler is always needed)

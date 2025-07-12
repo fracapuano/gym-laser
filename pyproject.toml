@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gym-laser"
+version = "0.1.0"
+description = "A gymnasium environment for laser pulse shaping"
+authors = [{name = "Francesco Capuano", email="fc.francescocapuano@gmail.com"}]
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.11"
+keywords = ["gym", "reinforcement learning", "physics", "gymnasium"]
+
+dependencies = [
+    "gymnasium[other]==1.0.0",
+    "numpy",
+    "matplotlib",
+    "pandas",
+    "scipy",
+    "torch",
+    "pygame",
+    "moviepy==1.0.3",
+    "rich",
+    "tqdm",
+    "pillow",
+    "line_profiler",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "line_profiler",
+]
+
+[project.urls]
+Homepage = "https://github.com/fracapuano/gym-laser"
+Repository = "https://github.com/fracapuano/gym-laser"
+Issues = "https://github.com/fracapuano/gym-laser/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["gym_laser*"]
+
+[tool.setuptools.package-data]
+gym_laser = ["data/*.txt", "data/*.csv"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
