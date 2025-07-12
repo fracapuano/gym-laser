@@ -21,6 +21,7 @@ def visualize_pulses(
         target_pulse (Tuple[torch.tensor, torch.tensor]): Tuple of tensors. First tensor is pulse time axis, second
                                                    tensor is temporal profile of a target pulse. This will
                                                    be plotted with a scatter plot.
+        stretcher_phase (Optional[torch.tensor]): Optional stretcher phase. If provided, it will be plotted as a solid line.
     """
     # centering and unpacking inputs pulses
     [time, actual_pulse], [target_time, target_pulse] = peak_on_peak(
@@ -34,7 +35,20 @@ def visualize_pulses(
         time.cpu().numpy(), 
         actual_pulse.cpu().numpy(), 
         lw = 2, 
-        label = "Temporal Pulse")
+        label = "Temporal Pulse",
+        c = "tab:blue"
+    )
+    
+    if stretcher_phase is not None:
+        ax2 = ax.twinx()
+        ax2.plot(
+            time.cpu().numpy(), 
+            stretcher_phase.cpu().numpy(), 
+            lw = 2, 
+            label = "Phase Control",
+            c = "tab:orange"
+        )
+        ax2.set_ylabel("Phase (rad)", fontsize=12)
 
     ax.scatter(
         time.cpu().numpy(), 
@@ -47,7 +61,7 @@ def visualize_pulses(
     ax.set_xlabel("Time (s)", fontsize=12)
     ax.set_ylabel("Intensity (a.u.)", fontsize=12)
     ax.set_xlim(-8e-12, 8e-12)
-    ax.legend()
+    ax.legend(loc="upper right", framealpha=1., fontsize=12)
 
     return fig, ax
 
