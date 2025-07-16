@@ -5,9 +5,24 @@ import gradio as gr
 import gymnasium as gym
 from stable_baselines3 import SAC
 from stable_baselines3.common.vec_env import VecFrameStack, DummyVecEnv
+import os
 
 # This is needed to register the custom environment
 import gym_laser
+
+# Pre-trained model configurations
+PRETRAINED_MODELS = {
+    "Random Policy": None,
+    "SAC-UDR(1.5,2.5)": "sac-udr-narrow", 
+    "SAC-UDR(1.0,9.0)": "sac-udr-wide-extra",
+    "Upload Custom Model": "upload"
+}
+
+MAX_STEPS = 100_000  # large number for continuous simulation
+
+def get_model_path(model_id):
+    """Get the path to a pre-trained model."""
+    return f"pretrained-policies/{model_id}.zip"
 
 
 def make_env_fn():
@@ -26,27 +41,54 @@ def initialize_environment():
             "obs": obs, 
             "model": None, 
             "step_num": 0,
-            "current_b_integral": 2.0  # Store current B-integral in state
+            "current_b_integral": 2.0,  # Store current B-integral in state
+            "model_filename": "Random Policy"  # Default model name
         }
-        return state, "Environment ready. Running with random policy."
+        return state
     except Exception as e:
         return None, f"Error: {e}"
 
 
-def load_model(state, model_path):
-    """Loads a model into the existing environment state."""
-    if model_path is None or state is None:
-        return state, "Upload failed or environment not ready."
+def load_selected_model(state, model_selection, uploaded_file):
+    """Loads a model based on selection (pre-trained or uploaded)."""
+    if state is None:
+        return state, "Environment not ready.", gr.update()
+    
     try:
-        model_filename = model_path.name.split('/')[-1]  # Get just the filename
-        state["model"] = SAC.load(model_path.name)
-        state["model_filename"] = model_filename  # Store the filename
-        state["obs"] = state["env"].reset() # Reset for the new policy
-        state["step_num"] = 0
-        return state, f"Model loaded: {model_filename}"
+        if model_selection == "Random Policy":
+            state["model"] = None
+            state["model_filename"] = "Random Policy"
+            state["obs"] = state["env"].reset()
+            state["step_num"] = 0
+            return state, "Using random policy", gr.update()
+        
+        elif model_selection == "Upload Custom Model":
+            if uploaded_file is None:
+                return state, "Please upload a model file.", gr.update()
+            
+            model_filename = uploaded_file.name.split('/')[-1]
+            state["model"] = SAC.load(uploaded_file.name)
+            state["model_filename"] = model_filename
+            state["obs"] = state["env"].reset()
+            state["step_num"] = 0
+            return state, f"Custom model loaded: {model_filename}", gr.update()
+        
+        else:
+            # Load pre-trained model
+            model_id = PRETRAINED_MODELS[model_selection]
+            model_path = get_model_path(model_id)
+            
+            if not os.path.exists(model_path):
+                return state, f"Pre-trained model not found: {model_path}", gr.update()
+            
+            state["model"] = SAC.load(model_path)
+            state["model_filename"] = model_selection
+            state["obs"] = state["env"].reset()
+            state["step_num"] = 0
+            return state, f"Pre-trained model loaded: {model_selection}", gr.update()
+            
     except Exception as e:
-        return state, f"Error loading model: {e}"
-
+        return state, f"Error loading model: {e}", gr.update()
 
 def update_b_integral(state, b_integral):
     """Updates the B-integral value in the state without restarting simulation."""
@@ -66,9 +108,9 @@ def run_continuous_simulation(state):
     step_num = state.get("step_num", 0)
     
     # Run for a large number of steps to simulate "always-on"
-    for i in range(100000):  # Large number for continuous simulation
+    for i in range(MAX_STEPS):
         model = state.get("model")
-        model_filename = state.get("model_filename", "")
+        model_filename = state.get("model_filename", "Random Policy")
         current_b = state.get("current_b_integral", 2.0)
         
         # Apply the current B-integral value from state
@@ -93,32 +135,16 @@ def run_continuous_simulation(state):
         state["obs"] = obs
         state["step_num"] = step_num
         
-        yield state, frame, status
+        yield state, frame
 
 
 with gr.Blocks() as demo:
-    gr.Markdown("# DRL for Laser Pulse Shaping")
-    gr.Markdown(
-        "A random policy simulation runs automatically with live updates. "
-        "Upload your own SAC model to see it take over. Adjust B-integral to see live effects."
-    )
+    gr.Markdown("# Shaping Laser Pulses with Reinforcement Learning")
+    
+    with gr.Tab("Demo"):
+        sim_state = gr.State()
 
-    sim_state = gr.State()
-
-    with gr.Row():
-        with gr.Column():
-            image_display = gr.Image(label="Environment Render", interactive=False, height=360)
-            status_box = gr.Textbox(label="Status", interactive=False)
-
-
-    with gr.Row():
-        with gr.Column(scale=1):
-            model_uploader = gr.UploadButton(
-                "Upload Model (.zip)",
-                file_types=['.zip'],
-                elem_id="model-upload",
-            )
-        with gr.Column(scale=3):
+        with gr.Row():
             b_slider = gr.Slider(
                 minimum=0,
                 maximum=10,
@@ -128,36 +154,83 @@ with gr.Blocks() as demo:
                 info="Adjust nonlinearity live during simulation.",
             )
 
-    # On page load, initialize and start the continuous simulation
-    init_event = demo.load(
-        fn=initialize_environment,
-        inputs=None,
-        outputs=[sim_state, status_box]
-    )
+        with gr.Row():
+            image_display = gr.Image(label="Environment Render", interactive=False, height=360)
+        
+        with gr.Row():
+            with gr.Column():
+                model_selector = gr.Dropdown(
+                    choices=list(PRETRAINED_MODELS.keys()),
+                    value="Random Policy",
+                    label="Model Selection",
+                    info="Choose a pre-trained model or upload your own"
+                )
+
+        with gr.Row():
+            with gr.Column(scale=1):
+                model_uploader = gr.UploadButton(
+                    "Upload Model (.zip)",
+                    file_types=['.zip'],
+                    elem_id="model-upload",
+                    visible=False  # Initially hidden
+                )
+
+        # Show/hide upload button based on selection
+        def update_upload_visibility(selection):
+            return gr.update(visible=(selection == "Upload Custom Model"))
+        
+        model_selector.change(
+            fn=update_upload_visibility,
+            inputs=[model_selector],
+            outputs=[model_uploader]
+        )
+
+        # On page load, initialize and start the continuous simulation
+        init_event = demo.load(
+            fn=initialize_environment,
+            inputs=None,
+            outputs=[sim_state]
+        )
+        
+        continuous_event = init_event.then(
+            fn=run_continuous_simulation,
+            inputs=[sim_state],
+            outputs=[sim_state, image_display]
+        )
+
+        # When model selection changes, load the selected model
+        model_change_event = model_selector.change(
+            fn=load_selected_model,
+            inputs=[sim_state, model_selector, model_uploader],
+            outputs=[sim_state, model_uploader],
+            cancels=[continuous_event]
+        ).then(
+            fn=run_continuous_simulation,
+            inputs=[sim_state],
+            outputs=[sim_state, image_display]
+        )
+
+        # When a custom model is uploaded, load it
+        model_upload_event = model_uploader.upload(
+            fn=load_selected_model,
+            inputs=[sim_state, model_selector, model_uploader],
+            outputs=[sim_state, model_uploader],
+            cancels=[continuous_event]
+        ).then(
+            fn=run_continuous_simulation,
+            inputs=[sim_state],
+            outputs=[sim_state, image_display]
+        )
+
+        # When B-integral slider changes, just update the value in state (no restart needed)
+        b_slider.change(
+            fn=update_b_integral,
+            inputs=[sim_state, b_slider],
+            outputs=[sim_state]
+        )
     
-    continuous_event = init_event.then(
-        fn=run_continuous_simulation,
-        inputs=[sim_state],
-        outputs=[sim_state, image_display, status_box]
-    )
-
-    # When a model is uploaded, restart simulation (this needs to restart to reset for new policy)
-    model_upload_event = model_uploader.upload(
-        fn=load_model,
-        inputs=[sim_state, model_uploader],
-        outputs=[sim_state, status_box],
-        cancels=[continuous_event]
-    ).then(
-        fn=run_continuous_simulation,
-        inputs=[sim_state],
-        outputs=[sim_state, image_display, status_box]
-    )
-
-    # When B-integral slider changes, just update the value in state (no restart needed)
-    b_slider.change(
-        fn=update_b_integral,
-        inputs=[sim_state, b_slider],
-        outputs=[sim_state]
-    )
+    with gr.Tab("About"):
+        with open("copy.md", "r") as f:
+            gr.Markdown(f.read())
 
 demo.launch()
