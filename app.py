@@ -5,13 +5,9 @@ import gradio as gr
 import gymnasium as gym
 from stable_baselines3 import SAC
 from stable_baselines3.common.vec_env import VecFrameStack, DummyVecEnv
-import time
 
 # This is needed to register the custom environment
 import gym_laser
-
-MAX_STEPS = 200
-MIN_B, MAX_B, STEP_B, DEFAULT_B = 0, 10, 0.5, 2.0
 
 
 def make_env_fn():
@@ -19,174 +15,130 @@ def make_env_fn():
     return gym.make("LaserEnv", render_mode="rgb_array")
 
 
-def initialize_environment(b_integral):
+def initialize_environment():
     """Initializes the environment on app load."""
     try:
         env = DummyVecEnv([make_env_fn])
         env = VecFrameStack(env, n_stack=5)
-        env.envs[0].unwrapped.laser.B = float(b_integral)
         obs = env.reset()
-        initial_frame = env.render()
-        state = { "env": env, "obs": obs, "model": None }
-        return state, initial_frame, "Environment ready. Run with a random policy or upload a model."
-    
+        state = { "env": env, "obs": obs, "model": None, "step_num": 0 }
+        return state, "Environment ready. Running with random policy."
     except Exception as e:
-        return None, None, f"Error: {e}"
+        return None, f"Error: {e}"
+
 
 def load_model(state, model_path):
     """Loads a model into the existing environment state."""
-    if model_path is None:
-        return state, "Upload failed."
-    if not state or "env" not in state:
-        return state, "Environment not initialized. Please refresh."
+    if model_path is None or state is None:
+        return state, "Upload failed or environment not ready."
     try:
         state["model"] = SAC.load(model_path.name)
         state["obs"] = state["env"].reset() # Reset for the new policy
-        initial_frame = state["env"].render()
-        return state, initial_frame, "Model loaded. Ready to run simulation."
+        state["step_num"] = 0
+        return state, "Model loaded. Running simulation."
     except Exception as e:
-        return state, None, f"Error loading model: {e}"
+        return state, f"Error loading model: {e}"
 
-def update_b_and_render(state, b_integral):
-    """
-    Updates the B-integral from the slider and renders the current state.
-    """
-    if not state or not state.get("env"):
-        return state, None, "Please upload a model first."
-        
-    env = state["env"]
-    env.envs[0].unwrapped.laser.B = float(b_integral)
-    
-    frame = env.render()
-    
-    return state, frame, f"B-integral set to {b_integral:.2f}"
 
-def run_policy_loop(state, b_integral):
-    """
-    Dispatcher that runs the appropriate simulation loop 
-    based on whether a model is loaded.
-    """
+def run_continuous_simulation(state, b_integral):
+    """Runs the simulation continuously, yielding frames."""
     if not state or "env" not in state:
-        yield None, "Environment not ready. Please refresh."
+        yield state, None, "Environment not ready."
         return
+
+    env = state["env"]
+    obs = state["obs"]
+    model = state.get("model")
+    step_num = state.get("step_num", 0)
     
-    if state.get("model"):
-        # Model is loaded, run the intelligent agent
-        yield from run_simulation_loop(state, b_integral)
-    else:
-        # No model, run a random agent
-        yield from run_random_policy(state, b_integral)
+    # Run for a large number of steps to simulate "always-on"
+    for i in range(100000):  # Large number for continuous simulation
+        # Apply the current B-integral value
+        env.envs[0].unwrapped.laser.B = float(b_integral)
 
-def run_random_policy(state, b_integral):
-    env = state["env"]
-    obs = state["obs"]
-
-    env.envs[0].unwrapped.laser.B = float(b_integral)
-
-    for i in range(MAX_STEPS):
-        action = env.action_space.sample()
-        obs, _, done, _ = env.step(action.reshape(1, -1))
-        frame = env.render()
-        
-        yield frame, f"Running random policy... Step {i+1}/{MAX_STEPS}"
-        time.sleep(0.05)
+        if model:
+            action, _ = model.predict(obs, deterministic=True)
+            status = f"Running model... Step {step_num} (B={b_integral:.1f})"
+        else:
+            action = env.action_space.sample().reshape(1, -1)
+            status = f"Running random policy... Step {step_num} (B={b_integral:.1f})"
             
-    state["obs"] = env.reset() if done[0] else obs
-    yield env.render(), "Random policy run finished."
-
-def run_simulation_loop(state, b_integral):
-    """
-    Runs a simulation loop for MAX_STEPS, yielding intermediate frames.
-    """
-    env = state["env"]
-    model = state["model"]
-    obs = state["obs"]
-
-    env.envs[0].unwrapped.laser.B = float(b_integral)
-
-    for i in range(MAX_STEPS):
-        action, _ = model.predict(obs, deterministic=True)
         obs, _, done, _ = env.step(action)
         frame = env.render()
         
-        yield frame, f"Running model... Step {i+1}/{MAX_STEPS}"
-        time.sleep(0.05)
-        
         if done[0]:
-            break
-            
-    state["obs"] = env.reset() if done[0] else obs
-    yield env.render(), "Simulation finished."
+            obs = env.reset()
+            step_num = 0
+        else:
+            step_num += 1
+
+        state["obs"] = obs
+        state["step_num"] = step_num
+        
+        yield state, frame, status
+        # time.sleep(0.05)  # Small delay for smooth animation
+
 
 with gr.Blocks() as demo:
     gr.Markdown("# DRL for Laser Pulse Shaping")
     gr.Markdown(
-        "Run a simulation with a random agent, or upload your own SAC model to see it in action. "
-        "Adjust the B-integral slider to see its effect on the pulse."
+        "A random policy simulation runs automatically with live updates. "
+        "Upload your own SAC model to see it take over. Adjust B-integral to see live effects."
     )
 
-    sim_state = gr.State(None)
+    sim_state = gr.State()
 
     with gr.Row():
-        with gr.Column(scale=1):
+        with gr.Column():
             model_uploader = gr.UploadButton(
                 "Upload Model (.zip)",
                 file_types=['.zip'],
                 elem_id="model-upload",
             )
-
-        with gr.Column(scale=3):
-            run_button = gr.Button("Run Simulation")
-
-    b_slider = gr.Slider(
-        minimum=MIN_B,
-        maximum=MAX_B,
-        step=STEP_B,
-        value=DEFAULT_B,
-        label="B-integral",
-        info="Tweak system's nonlinearity",
-    )
+        with gr.Column():
+            b_slider = gr.Slider(
+                minimum=0,
+                maximum=10,
+                step=0.5,
+                value=2.0,
+                label="B-integral",
+                info="Adjust nonlinearity live during simulation.",
+            )
 
     with gr.Row():
         with gr.Column():
-            image_display = gr.Image(
-                label="Environment Render", 
-                interactive=False, 
-                height=360
-            )
-            with gr.Row():
-                status_box = gr.Textbox(
-                    label="Status", 
-                    interactive=False, 
-                    scale=4
-                )
+            image_display = gr.Image(label="Environment Render", interactive=False, height=480)
+            status_box = gr.Textbox(label="Status", interactive=False)
 
-    # Event Handlers
-    demo.load(
+    # On page load, initialize and start the continuous simulation
+    continuous_event = demo.load(
         fn=initialize_environment,
-        inputs=[b_slider],
-        outputs=[sim_state, image_display, status_box]
-    )
-
-    b_slider.release(
-        fn=update_b_and_render,
+        inputs=None,
+        outputs=[sim_state, status_box]
+    ).then(
+        fn=run_continuous_simulation,
         inputs=[sim_state, b_slider],
         outputs=[sim_state, image_display, status_box]
     )
-    
-    # Define the click event for the run button so it can be cancelled
-    run_event = run_button.click(
-        fn=run_policy_loop,
-        inputs=[sim_state, b_slider],
-        outputs=[image_display, status_box]
-    )
 
-    # When a model is uploaded, it cancels any ongoing simulation run
-    model_uploader.upload(
+    # When a model is uploaded, cancel the current simulation and start a new one
+    model_upload_event = model_uploader.upload(
         fn=load_model,
         inputs=[sim_state, model_uploader],
+        outputs=[sim_state, status_box],
+        cancels=[continuous_event]
+    ).then(
+        fn=run_continuous_simulation,
+        inputs=[sim_state, b_slider],
+        outputs=[sim_state, image_display, status_box]
+    )
+
+    # When B-integral slider changes, restart the simulation with the new value
+    b_slider.change(
+        fn=run_continuous_simulation,
+        inputs=[sim_state, b_slider],
         outputs=[sim_state, image_display, status_box],
-        cancels=[run_event]
+        cancels=[continuous_event, model_upload_event]
     )
 
 demo.launch()
