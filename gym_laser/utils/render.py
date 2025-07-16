@@ -28,6 +28,8 @@ def visualize_pulses(
         pulse, 
         target_pulse
     )
+
+    subsample_factor = 5  # avoid overplotting the entire TL pulse
         
     fig, ax = plt.subplots(dpi=200)
     # plotting
@@ -51,9 +53,9 @@ def visualize_pulses(
         ax2.set_ylabel("Phase (rad)", fontsize=12)
 
     ax.scatter(
-        time.cpu().numpy(), 
-        target_pulse.cpu().numpy(),
-        label = "Target Pulse", 
+        time.cpu().numpy()[::subsample_factor], 
+        target_pulse.cpu().numpy()[::subsample_factor],
+        label = "Transform-Limited", 
         c = "tab:grey",
         marker = "x", 
         s = 50)
@@ -108,10 +110,35 @@ def visualize_frog(
     fig, ax = plt.subplots(dpi=200)
     ax.imshow(
         central_window, 
-        cmap="gray"
+        cmap="viridis"
     )
     ax.set_title("FROG Trace", fontsize=12)
     ax.axis("off")
+    
+    return fig, ax
+
+def visualize_peak_intensity(
+    peak_intensity: torch.Tensor,
+    threshold: float=70
+):
+    """Visualizes the peak intensity."""
+    fig, ax = plt.subplots(dpi=200)
+    ax.bar(
+        ["Peak Intensity (%TL)"],
+        [peak_intensity],
+        width=0.5
+    )
+    ax.set_ylim(0, 110)
+    ax.axhline(
+        y=threshold,
+        color="red",
+        linestyle="dashed",
+        linewidth=3,
+        label=f"{threshold}%"
+    )
+    
+    ax.set_ylabel("Intensity (%TL)", fontsize=18)
+    ax.legend(loc="upper right", framealpha=1., fontsize=18)
     
     return fig, ax
 

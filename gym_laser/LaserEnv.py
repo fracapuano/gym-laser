@@ -19,7 +19,8 @@ from gym_laser.utils.render import (
     visualize_pulses, 
     visualize_controls,
     visualize_frog,
-    visualize_reward
+    visualize_reward,
+    visualize_peak_intensity
 )
 from gym_laser.env_utils import extract_central_window
 
@@ -363,7 +364,7 @@ class FROGLaserEnv(AbstractBaseLaser):
         
         return self._get_obs(), reward, terminated, truncated, info
     
-    def _render_pulse(self)->np.array: 
+    def _render_pulse(self, verbose:bool=False)->np.array: 
         """Renders pulse shape against target.
         
         Returns:
@@ -387,23 +388,26 @@ class FROGLaserEnv(AbstractBaseLaser):
         
         # text box displays info on current control and transform-limited regret
         knobs = self.psi_picoseconds.tolist()
-        compressor_params = self.laser.compressor_params.tolist()
-        control_info = 'GDD: {:2.2e}\n'.format(knobs[0], compressor_params[0])+\
-                       'TOD: {:2.2e}\n'.format(knobs[1], compressor_params[1])+\
-                       'FOD: {:2.2e}\n'.format(knobs[2], compressor_params[2])+\
-                       'B-integral: {:.4f}'.format(self.laser.B)
-        
-        compressor_info = 'comp_GDD: {:2.2e}\n'.format(compressor_params[0])+\
-                          'comp_TOD: {:2.2e}\n'.format(compressor_params[1])+\
-                          'comp_FOD: {:2.2e}'.format(compressor_params[2])
-        
-        energy_info = 'FWHM (ps): {:2.2f}\n'.format(self._get_info()["current FWHM (ps)"])+\
-                      'x: {:2.2f}'.format(100 * self._get_info()["current Peak Intensity (TW/m^2)"] / (self.TL_intensity * 1e-12))
-        
         props = dict(boxstyle='round', facecolor='white', edgecolor='gray', alpha=0.5)
-        ax.text(0.7, 0.95, control_info, transform=ax.transAxes, fontsize=10, verticalalignment='top', bbox=props)
+        energy_info = \
+            'FWHM (ps): {:2.2f}\n'.format(self._get_info()["current FWHM (ps)"])+\
+            r'$I^*/I_{TL}$ (%)' + ': {:2.2f}'.format(100 * self._get_info()["current Peak Intensity (TW/m^2)"] / (self.TL_intensity * 1e-12))
         ax.text(0.025, 0.8, energy_info, transform=ax.transAxes, fontsize=10, verticalalignment='top', bbox=props)
-        ax.text(0.025, 0.7, compressor_info, transform=ax.transAxes, fontsize=10, verticalalignment='top', bbox=props)
+
+        if verbose:
+            # Mostly for debugging purposes
+            compressor_params = self.laser.compressor_params.tolist()
+            control_info = 'GDD: {:2.2e}\n'.format(knobs[0], compressor_params[0])+\
+                        'TOD: {:2.2e}\n'.format(knobs[1], compressor_params[1])+\
+                        'FOD: {:2.2e}\n'.format(knobs[2], compressor_params[2])+\
+                        'B-integral: {:.4f}'.format(self.laser.B)
+            
+            compressor_info = 'comp_GDD: {:2.2e}\n'.format(compressor_params[0])+\
+                            'comp_TOD: {:2.2e}\n'.format(compressor_params[1])+\
+                            'comp_FOD: {:2.2e}'.format(compressor_params[2])
+        
+            ax.text(0.7, 0.95, control_info, transform=ax.transAxes, fontsize=10, verticalalignment='top', bbox=props)
+            ax.text(0.025, 0.7, compressor_info, transform=ax.transAxes, fontsize=10, verticalalignment='top', bbox=props)
         
         ax.legend(loc="upper left", fontsize=12)
         ax.set_title(title_string, fontsize=12)
@@ -413,11 +417,12 @@ class FROGLaserEnv(AbstractBaseLaser):
         X = np.array(fig.canvas.renderer.buffer_rgba())
         img = Image.fromarray(X)
         # Maintain aspect ratio while resizing
-        target_height = 240
+        target_height = self.screen_height
         aspect_ratio = img.size[0] / img.size[1]
         target_width = int(target_height * aspect_ratio)
         img = img.resize((target_width, target_height), Image.Resampling.LANCZOS)
         pulses_rgb_array = np.array(img.convert('RGB'))
+        
         plt.close(fig)
 
         return pulses_rgb_array
@@ -425,6 +430,7 @@ class FROGLaserEnv(AbstractBaseLaser):
     def _render_controls(self)->np.array:
         """
         Renders the evolution of control parameters in feasible space with respect to a size `n` deque.
+        WARNING: Deprecated.
         """
         fig, ax = visualize_controls(self.controls_buffer)
         # specializing the plots for showcasing trajectories
@@ -439,7 +445,7 @@ class FROGLaserEnv(AbstractBaseLaser):
         fig.canvas.draw()
         X = np.array(fig.canvas.renderer.buffer_rgba())
         img = Image.fromarray(X)
-        target_height = 240
+        target_height = self.screen_height
         aspect_ratio = img.size[0] / img.size[1]
         target_width = int(target_height * aspect_ratio)
         img = img.resize((target_width, target_height), Image.Resampling.LANCZOS)
@@ -450,12 +456,12 @@ class FROGLaserEnv(AbstractBaseLaser):
     
     def _render_frog(self)->np.array:
         """Renders FROG trace."""
-        fig, ax = visualize_frog(self.frog.cpu().numpy(), window_size=self.window_size)
+        fig, ax = visualize_frog(self.frog.cpu().numpy(), window_size=128)
 
         fig.canvas.draw()
         X = np.array(fig.canvas.renderer.buffer_rgba())
         img = Image.fromarray(X)
-        target_height = 240
+        target_height = self.screen_height
         aspect_ratio = img.size[0] / img.size[1]
         target_width = int(target_height * aspect_ratio)
         img = img.resize((target_width, target_height), Image.Resampling.LANCZOS)
@@ -465,13 +471,14 @@ class FROGLaserEnv(AbstractBaseLaser):
         return frog_rgb_array
     
     def _render_reward(self)->np.array:
-        """Renders reward components."""
+        """Renders reward components.
+        Implemented for debugging pursposes over the course of training."""
         fig, ax = visualize_reward(self.reward_components)
         
         fig.canvas.draw()
         X = np.array(fig.canvas.renderer.buffer_rgba())
         img = Image.fromarray(X)
-        target_height = 240
+        target_height = self.screen_height
         aspect_ratio = img.size[0] / img.size[1]
         target_width = int(target_height * aspect_ratio)
         img = img.resize((target_width, target_height), Image.Resampling.LANCZOS)
@@ -479,24 +486,44 @@ class FROGLaserEnv(AbstractBaseLaser):
         plt.close(fig)
         return reward_rgb_array
 
+    def _render_peak_intensity(self)->np.array:
+        """Renders peak intensity.
+        Implemented for debugging pursposes over the course of training."""
+        current_intensity_perc = self._info["x_t(perc)"]
+        fig, ax = visualize_peak_intensity(current_intensity_perc)
+
+        fig.canvas.draw()
+        X = np.array(fig.canvas.renderer.buffer_rgba())
+        img = Image.fromarray(X)
+        target_height = self.screen_height
+        aspect_ratio = img.size[0] / img.size[1]
+        target_width = int(target_height * aspect_ratio)
+        img = img.resize((target_width, target_height), Image.Resampling.LANCZOS)
+        peak_intensity_rgb_array = np.array(img.convert('RGB'))
+        plt.close(fig)
+
+        return peak_intensity_rgb_array
+
     def _render_frame(self):
         """
         Renders one frame using Pygame or returns RGB arrays depending on render_mode.
         """
+        self.screen_width, self.screen_height = 1280, 480
+
         # Get the visualization arrays - adjust transposition to match desired orientation
         pulse_rgb_array = np.transpose(self._render_pulse(), axes=(1, 0, 2))
-        # controls_rgb_array = np.transpose(self._render_controls(), axes=(1, 0, 2))
-        controls_rgb_array = np.transpose(self._render_reward(), axes=(1, 0, 2))
+        peak_intensity_rgb_array = np.transpose(self._render_peak_intensity(), axes=(1, 0, 2))
         frog_rgb_array = np.transpose(self._render_frog(), axes=(1, 0, 2))
 
         if self.render_mode == "rgb_array":
             # For rgb_array mode, combine the three arrays horizontally
-            combined = np.concatenate([pulse_rgb_array, controls_rgb_array, frog_rgb_array], axis=0)
+            combined = np.concatenate([pulse_rgb_array, peak_intensity_rgb_array, frog_rgb_array], axis=0)
+            
             # Final transpose to get the correct orientation
             return np.transpose(combined, axes=(1, 0, 2))
 
         elif self.render_mode == "human":
-            screen_size = (960, 240)  # Three panels: each 320 x 240
+            screen_size = (960, 240)  # Two panels: each 320 x 240
 
             # Initialize Pygame window and clock if necessary
             if getattr(self, "window", None) is None:
@@ -514,13 +541,9 @@ class FROGLaserEnv(AbstractBaseLaser):
                     return None
 
             # Create and scale surfaces for each panel
-            panel_width = screen_size[0] // 3
+            panel_width = screen_size[0] // 2
             pulses_surf = pygame.transform.scale(
                 pygame.surfarray.make_surface(pulse_rgb_array), 
-                (panel_width, screen_size[1])
-            )
-            controls_surf = pygame.transform.scale(
-                pygame.surfarray.make_surface(controls_rgb_array), 
                 (panel_width, screen_size[1])
             )
             frog_surf = pygame.transform.scale(
@@ -530,15 +553,12 @@ class FROGLaserEnv(AbstractBaseLaser):
 
             # Blit (draw) the surfaces onto the window
             self.window.blit(pulses_surf, (0, 0))
-            self.window.blit(controls_surf, (panel_width, 0))
-            self.window.blit(frog_surf, (2 * panel_width, 0))
+            self.window.blit(frog_surf, (panel_width, 0))
 
             # Update the display
             pygame.display.flip()
             self.clock.tick(self.metadata["render_fps"])
 
-            # Return the same format as rgb_array mode for consistency
-            # return np.transpose(pygame.surfarray.array3d(self.window), (1, 0, 2))
             return None
 
     def close(self):
