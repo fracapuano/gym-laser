@@ -38,10 +38,12 @@ def load_model(state, model_path):
     if model_path is None or state is None:
         return state, "Upload failed or environment not ready."
     try:
+        model_filename = model_path.name.split('/')[-1]  # Get just the filename
         state["model"] = SAC.load(model_path.name)
+        state["model_filename"] = model_filename  # Store the filename
         state["obs"] = state["env"].reset() # Reset for the new policy
         state["step_num"] = 0
-        return state, "Model loaded. Running simulation."
+        return state, f"Model loaded: {model_filename}"
     except Exception as e:
         return state, f"Error loading model: {e}"
 
@@ -66,6 +68,7 @@ def run_continuous_simulation(state):
     # Run for a large number of steps to simulate "always-on"
     for i in range(100000):  # Large number for continuous simulation
         model = state.get("model")
+        model_filename = state.get("model_filename", "")
         current_b = state.get("current_b_integral", 2.0)
         
         # Apply the current B-integral value from state
@@ -73,10 +76,10 @@ def run_continuous_simulation(state):
 
         if model:
             action, _ = model.predict(obs, deterministic=True)
-            status = f"Running model / Step {step_num} (B={current_b:.1f})"
+            status = f"Running model: {model_filename} / Step {step_num} (B={current_b:.1f})"
         else:
             action = env.action_space.sample().reshape(1, -1)
-            status = f"Running random policy / Step {step_num} (B={current_b:.1f})"
+            status = f"Running random policy / Step {step_num} (B={current_b:.1f})" 
             
         obs, _, done, _ = env.step(action)
         frame = env.render()
@@ -91,7 +94,6 @@ def run_continuous_simulation(state):
         state["step_num"] = step_num
         
         yield state, frame, status
-        # time.sleep(0.05)  # Small delay for smooth animation
 
 
 with gr.Blocks() as demo:
@@ -105,12 +107,18 @@ with gr.Blocks() as demo:
 
     with gr.Row():
         with gr.Column():
+            image_display = gr.Image(label="Environment Render", interactive=False, height=360)
+            status_box = gr.Textbox(label="Status", interactive=False)
+
+
+    with gr.Row():
+        with gr.Column(scale=1):
             model_uploader = gr.UploadButton(
                 "Upload Model (.zip)",
                 file_types=['.zip'],
                 elem_id="model-upload",
             )
-        with gr.Column():
+        with gr.Column(scale=3):
             b_slider = gr.Slider(
                 minimum=0,
                 maximum=10,
@@ -119,11 +127,6 @@ with gr.Blocks() as demo:
                 label="B-integral",
                 info="Adjust nonlinearity live during simulation.",
             )
-
-    with gr.Row():
-        with gr.Column():
-            image_display = gr.Image(label="Environment Render", interactive=False, height=480)
-            status_box = gr.Textbox(label="Status", interactive=False)
 
     # On page load, initialize and start the continuous simulation
     init_event = demo.load(
