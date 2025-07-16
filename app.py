@@ -1,3 +1,6 @@
+import matplotlib
+matplotlib.use('Agg')
+
 import gradio as gr
 import gymnasium as gym
 from stable_baselines3 import SAC
@@ -8,10 +11,13 @@ import time
 import gym_laser
 
 MAX_STEPS = 200
+MIN_B, MAX_B, STEP_B, DEFAULT_B = 0, 10, 0.5, 2.0
+
 
 def make_env_fn():
     """Helper function to create a single environment instance."""
     return gym.make("LaserEnv", render_mode="rgb_array")
+
 
 def initialize_environment(b_integral):
     """Initializes the environment on app load."""
@@ -122,41 +128,43 @@ with gr.Blocks() as demo:
     sim_state = gr.State(None)
 
     with gr.Row():
-        with gr.Column():
+        with gr.Column(scale=1):
             model_uploader = gr.UploadButton(
                 "Upload Model (.zip)",
                 file_types=['.zip'],
                 elem_id="model-upload",
             )
 
-        with gr.Column():
+        with gr.Column(scale=3):
             run_button = gr.Button("Run Simulation")
 
     b_slider = gr.Slider(
-        minimum=0,
-        maximum=10,
-        step=0.5,
-        value=2.0,
+        minimum=MIN_B,
+        maximum=MAX_B,
+        step=STEP_B,
+        value=DEFAULT_B,
         label="B-integral",
         info="Tweak system's nonlinearity",
     )
 
     with gr.Row():
         with gr.Column():
-            image_display = gr.Image(label="Environment Render", interactive=False, height=360)
+            image_display = gr.Image(
+                label="Environment Render", 
+                interactive=False, 
+                height=360
+            )
             with gr.Row():
-                status_box = gr.Textbox(label="Status", interactive=False, scale=4)
+                status_box = gr.Textbox(
+                    label="Status", 
+                    interactive=False, 
+                    scale=4
+                )
 
     # Event Handlers
     demo.load(
         fn=initialize_environment,
         inputs=[b_slider],
-        outputs=[sim_state, image_display, status_box]
-    )
-
-    model_uploader.upload(
-        fn=load_model,
-        inputs=[sim_state, model_uploader],
         outputs=[sim_state, image_display, status_box]
     )
 
@@ -166,10 +174,19 @@ with gr.Blocks() as demo:
         outputs=[sim_state, image_display, status_box]
     )
     
-    run_button.click(
+    # Define the click event for the run button so it can be cancelled
+    run_event = run_button.click(
         fn=run_policy_loop,
         inputs=[sim_state, b_slider],
         outputs=[image_display, status_box]
+    )
+
+    # When a model is uploaded, it cancels any ongoing simulation run
+    model_uploader.upload(
+        fn=load_model,
+        inputs=[sim_state, model_uploader],
+        outputs=[sim_state, image_display, status_box],
+        cancels=[run_event]
     )
 
 demo.launch()
