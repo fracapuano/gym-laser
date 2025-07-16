@@ -21,7 +21,13 @@ def initialize_environment():
         env = DummyVecEnv([make_env_fn])
         env = VecFrameStack(env, n_stack=5)
         obs = env.reset()
-        state = { "env": env, "obs": obs, "model": None, "step_num": 0 }
+        state = { 
+            "env": env, 
+            "obs": obs, 
+            "model": None, 
+            "step_num": 0,
+            "current_b_integral": 2.0  # Store current B-integral in state
+        }
         return state, "Environment ready. Running with random policy."
     except Exception as e:
         return None, f"Error: {e}"
@@ -40,28 +46,37 @@ def load_model(state, model_path):
         return state, f"Error loading model: {e}"
 
 
-def run_continuous_simulation(state, b_integral):
-    """Runs the simulation continuously, yielding frames."""
+def update_b_integral(state, b_integral):
+    """Updates the B-integral value in the state without restarting simulation."""
+    if state is not None:
+        state["current_b_integral"] = b_integral
+    return state
+
+
+def run_continuous_simulation(state):
+    """Runs the simulation continuously, using the current B-integral from state."""
     if not state or "env" not in state:
         yield state, None, "Environment not ready."
         return
 
     env = state["env"]
     obs = state["obs"]
-    model = state.get("model")
     step_num = state.get("step_num", 0)
     
     # Run for a large number of steps to simulate "always-on"
     for i in range(100000):  # Large number for continuous simulation
-        # Apply the current B-integral value
-        env.envs[0].unwrapped.laser.B = float(b_integral)
+        model = state.get("model")
+        current_b = state.get("current_b_integral", 2.0)
+        
+        # Apply the current B-integral value from state
+        env.envs[0].unwrapped.laser.B = float(current_b)
 
         if model:
             action, _ = model.predict(obs, deterministic=True)
-            status = f"Running model... Step {step_num} (B={b_integral:.1f})"
+            status = f"Running model / Step {step_num} (B={current_b:.1f})"
         else:
             action = env.action_space.sample().reshape(1, -1)
-            status = f"Running random policy... Step {step_num} (B={b_integral:.1f})"
+            status = f"Running random policy / Step {step_num} (B={current_b:.1f})"
             
         obs, _, done, _ = env.step(action)
         frame = env.render()
@@ -111,17 +126,19 @@ with gr.Blocks() as demo:
             status_box = gr.Textbox(label="Status", interactive=False)
 
     # On page load, initialize and start the continuous simulation
-    continuous_event = demo.load(
+    init_event = demo.load(
         fn=initialize_environment,
         inputs=None,
         outputs=[sim_state, status_box]
-    ).then(
+    )
+    
+    continuous_event = init_event.then(
         fn=run_continuous_simulation,
-        inputs=[sim_state, b_slider],
+        inputs=[sim_state],
         outputs=[sim_state, image_display, status_box]
     )
 
-    # When a model is uploaded, cancel the current simulation and start a new one
+    # When a model is uploaded, restart simulation (this needs to restart to reset for new policy)
     model_upload_event = model_uploader.upload(
         fn=load_model,
         inputs=[sim_state, model_uploader],
@@ -129,16 +146,15 @@ with gr.Blocks() as demo:
         cancels=[continuous_event]
     ).then(
         fn=run_continuous_simulation,
-        inputs=[sim_state, b_slider],
+        inputs=[sim_state],
         outputs=[sim_state, image_display, status_box]
     )
 
-    # When B-integral slider changes, restart the simulation with the new value
+    # When B-integral slider changes, just update the value in state (no restart needed)
     b_slider.change(
-        fn=run_continuous_simulation,
+        fn=update_b_integral,
         inputs=[sim_state, b_slider],
-        outputs=[sim_state, image_display, status_box],
-        cancels=[continuous_event, model_upload_event]
+        outputs=[sim_state]
     )
 
 demo.launch()
