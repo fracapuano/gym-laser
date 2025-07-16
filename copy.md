@@ -1,3 +1,11 @@
+# Table of Contents
+- [TL;DR](#tl-dr)
+- [Shaping Laser Pulses](#shaping-laser-pulses)
+- [Automated approaches](#automated-approaches)
+  - [BO's limitations](#bos-limitations)
+    - [1. Imprecise pulse reconstruction](#1-imprecise-pulse-reconstruction)
+
+
 ## TL; DR: 
 We train a Reinforcement Learning agent to **optimally shape laser pulses** from readily-available diagnostics images, across a range of dynamics parameters for intensity maximization.
 Our method **(1) completely bypasses imprecise reconstructions** of ultra-fast laser pulses, **(2) can learn to be robust to varying dynamics** and **(3) prevents erratic behavior** at test-time by training in coarse simulation only.
