@@ -7,15 +7,17 @@ from stable_baselines3 import SAC
 from stable_baselines3.common.vec_env import VecFrameStack, DummyVecEnv
 import os
 
+from huggingface_hub import hf_hub_download
+
 # This is needed to register the custom environment
 import gym_laser
 
-# Pre-trained model configurations
+# Pre-trained model configurations (TODO: add models by hosting them on huggingface)
 PRETRAINED_MODELS = {
     "Random Policy": None,
+    "Upload Custom Model": "upload",
     "SAC-UDR(1.5,2.5)": "sac-udr-narrow", 
     "SAC-UDR(1.0,9.0)": "sac-udr-wide-extra",
-    "Upload Custom Model": "upload"
 }
 
 MAX_STEPS = 100_000  # large number for continuous simulation
@@ -23,6 +25,14 @@ MAX_STEPS = 100_000  # large number for continuous simulation
 def get_model_path(model_id):
     """Get the path to a pre-trained model."""
     return f"pretrained-policies/{model_id}.zip"
+
+
+def load_pretrained_model(model_id):
+    """Load a pre-trained model."""
+    model = hf_hub_download(
+        repo_id=f"fracapuano/{model_id}", filename=f"{model_id}.zip"
+    )
+    return SAC.load(model)
 
 
 def make_env_fn():
@@ -52,7 +62,7 @@ def initialize_environment():
 def load_selected_model(state, model_selection, uploaded_file):
     """Loads a model based on selection (pre-trained or uploaded)."""
     if state is None:
-        return state, "Environment not ready.", gr.update()
+        return state, gr.update()
     
     try:
         if model_selection == "Random Policy":
@@ -60,7 +70,7 @@ def load_selected_model(state, model_selection, uploaded_file):
             state["model_filename"] = "Random Policy"
             state["obs"] = state["env"].reset()
             state["step_num"] = 0
-            return state, "Using random policy", gr.update()
+            return state, gr.update()
         
         elif model_selection == "Upload Custom Model":
             if uploaded_file is None:
@@ -71,21 +81,17 @@ def load_selected_model(state, model_selection, uploaded_file):
             state["model_filename"] = model_filename
             state["obs"] = state["env"].reset()
             state["step_num"] = 0
-            return state, f"Custom model loaded: {model_filename}", gr.update()
+            return state, gr.update()
         
         else:
-            # Load pre-trained model
             model_id = PRETRAINED_MODELS[model_selection]
-            model_path = get_model_path(model_id)
+            model = load_pretrained_model(model_id)
             
-            if not os.path.exists(model_path):
-                return state, f"Pre-trained model not found: {model_path}", gr.update()
-            
-            state["model"] = SAC.load(model_path)
+            state["model"] = model
             state["model_filename"] = model_selection
             state["obs"] = state["env"].reset()
             state["step_num"] = 0
-            return state, f"Pre-trained model loaded: {model_selection}", gr.update()
+            return state, gr.update()
             
     except Exception as e:
         return state, f"Error loading model: {e}", gr.update()
@@ -118,10 +124,8 @@ def run_continuous_simulation(state):
 
         if model:
             action, _ = model.predict(obs, deterministic=True)
-            status = f"Running model: {model_filename} / Step {step_num} (B={current_b:.1f})"
         else:
             action = env.action_space.sample().reshape(1, -1)
-            status = f"Running random policy / Step {step_num} (B={current_b:.1f})" 
             
         obs, _, done, _ = env.step(action)
         frame = env.render()
@@ -138,7 +142,7 @@ def run_continuous_simulation(state):
         yield state, frame
 
 
-with gr.Blocks() as demo:
+with gr.Blocks(css="body {zoom: 90%}") as demo:
     gr.Markdown("# Shaping Laser Pulses with Reinforcement Learning")
     
     with gr.Tab("Demo"):
