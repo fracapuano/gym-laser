@@ -2,8 +2,8 @@
 - [TL;DR](#tl-dr)
 - [Shaping Laser Pulses](#shaping-laser-pulses)
 - [Automated approaches](#automated-approaches)
-  - [BO's limitations](#bos-limitations)
-    - [1. Imprecise pulse reconstruction](#1-imprecise-pulse-reconstruction)
+- [BO's limitations](#bos-limitations)
+- [RL to the rescue](#rl-to-the-rescue)
 
 
 ## TL; DR: 
