@@ -3,14 +3,7 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-`gym-laser` is a physics-informed simulated environment for laser pulse optimization using [`gymnasium`](https://gymnasium.farama.org/). Check out our demo 👇
-
-<script
-	type="module"
-	src="https://gradio.s3-us-west-2.amazonaws.com/5.35.0/gradio.js"
-></script>
-
-<gradio-app src="https://fracapuano-rlaser.hf.space"></gradio-app>
+`gym-laser` is a physics-informed simulated environment for laser pulse optimization using [`gymnasium`](https://gymnasium.farama.org/). Check out [our demo](https://huggingface.co/spaces/fracapuano/RLaser)!
 
 ## Features
 
